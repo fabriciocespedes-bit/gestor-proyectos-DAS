@@ -9,5 +9,8 @@ dist/
 # scratch
 .rls-test/
 
+# herramientas locales (config del visor/preview, rutas de la máquina)
+.claude/
+
 # prisma
 prisma/*.db
