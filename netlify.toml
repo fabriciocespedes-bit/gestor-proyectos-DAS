@@ -1,0 +1,20 @@
+# ── Netlify · ProjectOS (frontend Next.js, monorepo pnpm) ───────────────
+# El backend es Supabase (Postgres + Auth + Storage + Edge Functions).
+
+[build]
+  # Instala el workspace completo en la raíz y construye solo la web.
+  command = "pnpm install --frozen-lockfile=false && pnpm --filter @projectos/web build"
+  publish = "apps/web/.next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  PNPM_VERSION = "9"
+  # Acelera el build evitando telemetría.
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Runtime oficial de Next.js en Netlify (SSR, middleware, edge).
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Variables NEXT_PUBLIC_* se definen en el panel de Netlify (Site settings →
+# Environment variables). Ver .env.example y DEPLOY.md.

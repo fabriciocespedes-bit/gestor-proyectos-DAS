@@ -1,0 +1,28 @@
+{
+  "name": "@projectos/db",
+  "version": "0.1.0",
+  "description": "Prisma client, RLS multi-tenant y seeds de ProjectOS",
+  "main": "src/client.ts",
+  "scripts": {
+    "generate": "prisma generate --schema ../../prisma/schema.prisma",
+    "migrate": "prisma migrate dev --schema ../../prisma/schema.prisma",
+    "migrate:deploy": "prisma migrate deploy --schema ../../prisma/schema.prisma",
+    "rls:apply": "psql \"$MIGRATE_DATABASE_URL\" -f ../../prisma/migrations/20260609_rls/migration.sql",
+    "seed": "tsx ../../prisma/seed.ts",
+    "test:rls": "node ../../prisma/rls.isolation.test.mjs"
+  },
+  "prisma": {
+    "schema": "../../prisma/schema.prisma",
+    "seed": "tsx ../../prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.0",
+    "prisma": "^5.22.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.4.0"
+  }
+}

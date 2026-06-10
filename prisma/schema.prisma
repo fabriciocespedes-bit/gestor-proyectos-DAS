@@ -1,0 +1,501 @@
+// ProjectOS — Modelo de datos (PostgreSQL via Prisma)
+// Multi-tenant por `organizationId`. Soft-delete por `deletedAt`.
+// Convención: todos los IDs son cuid(); timestamps en UTC.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────────────────────────────────────
+// TENANCY & IDENTIDAD
+// ───────────────────────────────────────────────────────────
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  plan        Plan     @default(FREE)
+  seats       Int      @default(5)
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  members     Membership[]
+  teams       Team[]
+  projects    Project[]
+  objectives  Objective[]
+  labels      Label[]
+
+  @@index([slug])
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  avatarUrl     String?
+  // Autenticación por correo + contraseña (Auth.js Credentials).
+  // Hash con bcrypt (cost 12). Null = solo OAuth/magic-link.
+  passwordHash  String?
+  // Administrador de cuentas a nivel plataforma (bypassa RLS de tenant).
+  isSuperAdmin  Boolean  @default(false)
+  emailVerified DateTime?
+  lastLoginAt   DateTime?
+  // Disponibilidad base usada por capacidad/timeboxing
+  weeklyHours   Float    @default(40)
+  timezone      String   @default("UTC")
+  workingHours  Json     @default("{\"mon\":[9,18],\"tue\":[9,18],\"wed\":[9,18],\"thu\":[9,18],\"fri\":[9,17]}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships   Membership[]
+  assignedTasks Task[]       @relation("TaskAssignee")
+  reportedTasks Task[]       @relation("TaskReporter")
+  comments      Comment[]
+  timeBlocks    TimeBlock[]
+  activities    Activity[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           OrgRole      @default(MEMBER)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  teamMembers    TeamMember[]
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Team {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+  projects       Project[]
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+model TeamMember {
+  id             String     @id @default(cuid())
+  organizationId String     // denormalizado para RLS
+  teamId         String
+  membershipId   String
+  capacityPct    Float      @default(100) // % de su weeklyHours dedicado a este team
+  team           Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  membership     Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, membershipId])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// PROYECTOS
+// ───────────────────────────────────────────────────────────
+
+model Project {
+  id             String        @id @default(cuid())
+  organizationId String
+  teamId         String?
+  key            String        // p.ej. "OPS" — prefijo de tareas OPS-123
+  name           String
+  description    String?
+  goal           String?
+  status         ProjectStatus @default(IDEA)
+  priority       Priority      @default(MEDIUM)
+  sponsorId      String?
+  ownerId        String?
+  startDate      DateTime?
+  dueDate        DateTime?
+  riskScore      Float         @default(0) // 0-100 calculado
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team           Team?         @relation(fields: [teamId], references: [id])
+  tasks          Task[]
+  columns        BoardColumn[]
+  milestones     Milestone[]
+  documents      Document[]
+  keyResults     KeyResult[]   @relation("KRProjects")
+
+  @@unique([organizationId, key])
+  @@index([organizationId, status])
+}
+
+model BoardColumn {
+  id             String @id @default(cuid())
+  organizationId String // denormalizado para RLS
+  projectId      String
+  name           String // Backlog, Pendiente, Esta semana, Hoy, En progreso, Bloqueado, En revisión, Terminado
+  order          Int
+  wipLimit       Int?   // límite WIP opcional por columna
+  project        Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks          Task[]
+
+  @@index([projectId])
+  @@index([organizationId])
+}
+
+model Milestone {
+  id             String   @id @default(cuid())
+  organizationId String   // denormalizado para RLS
+  projectId      String
+  name           String
+  dueDate        DateTime
+  reached        Boolean  @default(false)
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// TAREAS
+// ───────────────────────────────────────────────────────────
+
+model Task {
+  id            String     @id @default(cuid())
+  organizationId String    // denormalizado para RLS
+  projectId     String
+  columnId      String?
+  number        Int        // secuencial por proyecto → key OPS-123
+  title         String
+  description   String?
+  status        TaskStatus @default(TODO)
+  priority      Priority   @default(MEDIUM)
+
+  // Inputs del algoritmo de priorización (0-5 c/u salvo nota)
+  impact          Int      @default(3)
+  urgency         Int      @default(3)
+  strategicValue  Int      @default(3)
+  riskFactor      Int      @default(2)
+  priorityScore   Float    @default(0) // 0-100 calculado
+
+  // Estimación / ejecución
+  estimatedHours  Float?
+  actualHours     Float    @default(0)
+
+  assigneeId    String?
+  reporterId    String?
+  dueDate       DateTime?
+  startDate     DateTime?
+  order         Float      @default(0) // posición fraccional para drag&drop estable
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
+
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  column        BoardColumn? @relation(fields: [columnId], references: [id])
+  assignee      User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  reporter      User?      @relation("TaskReporter", fields: [reporterId], references: [id])
+
+  labels        TaskLabel[]
+  checklist     ChecklistItem[]
+  comments      Comment[]
+  attachments   Attachment[]
+  timeBlocks    TimeBlock[]
+
+  // Dependencias (esta tarea depende de `dependsOn`)
+  dependencies  Dependency[] @relation("DependentTask")
+  dependents    Dependency[] @relation("BlockingTask")
+
+  keyResultId   String?
+  keyResult     KeyResult?  @relation(fields: [keyResultId], references: [id])
+
+  @@unique([projectId, number])
+  @@index([projectId, status])
+  @@index([assigneeId])
+  @@index([priorityScore])
+  @@index([organizationId, status])
+}
+
+model Dependency {
+  id             String         @id @default(cuid())
+  organizationId String         // denormalizado para RLS
+  dependentId    String         // la que espera
+  blockingId     String         // la que debe terminar antes
+  type           DependencyType @default(FINISH_TO_START)
+  dependent      Task           @relation("DependentTask", fields: [dependentId], references: [id], onDelete: Cascade)
+  blocking       Task           @relation("BlockingTask", fields: [blockingId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentId, blockingId])
+  @@index([blockingId])
+  @@index([organizationId])
+}
+
+model ChecklistItem {
+  id             String  @id @default(cuid())
+  organizationId String  // denormalizado para RLS
+  taskId         String
+  text           String
+  done           Boolean @default(false)
+  order          Int
+  task           Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([organizationId])
+}
+
+model Label {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  color          String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks          TaskLabel[]
+
+  @@unique([organizationId, name])
+}
+
+model TaskLabel {
+  organizationId String // denormalizado para RLS
+  taskId         String
+  labelId        String
+  task           Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label          Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, labelId])
+  @@index([organizationId])
+}
+
+model Comment {
+  id             String   @id @default(cuid())
+  organizationId String   // denormalizado para RLS
+  taskId         String
+  authorId       String
+  body           String
+  createdAt      DateTime @default(now())
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author         User     @relation(fields: [authorId], references: [id])
+
+  @@index([taskId])
+  @@index([organizationId])
+}
+
+model Attachment {
+  id             String   @id @default(cuid())
+  organizationId String   // denormalizado para RLS
+  taskId         String
+  fileName       String
+  url            String
+  sizeBytes      Int
+  mimeType       String
+  createdAt      DateTime @default(now())
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// TIMEBOXING & CAPACIDAD
+// ───────────────────────────────────────────────────────────
+
+model TimeBlock {
+  id             String        @id @default(cuid())
+  organizationId String        // denormalizado para RLS
+  taskId         String
+  userId         String
+  start          DateTime
+  end            DateTime
+  status         TimeBlockState @default(PLANNED)
+  source         TimeBlockSource @default(AUTO) // AUTO = generado por el motor
+  task           Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, start])
+  @@index([taskId])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// OKR
+// ───────────────────────────────────────────────────────────
+
+model Objective {
+  id             String       @id @default(cuid())
+  organizationId String
+  title          String
+  description    String?
+  period         String       // p.ej. "2026-Q2"
+  progress       Float        @default(0) // 0-100 derivado de KRs
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  keyResults     KeyResult[]
+
+  @@index([organizationId, period])
+}
+
+model KeyResult {
+  id             String    @id @default(cuid())
+  organizationId String    // denormalizado para RLS
+  objectiveId    String
+  title          String
+  metric         String    // "Reducir atrasos"
+  unit           String    @default("%")
+  startValue     Float     @default(0)
+  targetValue    Float
+  currentValue   Float     @default(0)
+  objective      Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  projects       Project[] @relation("KRProjects")
+  tasks          Task[]
+
+  @@index([objectiveId])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// DOCUMENTACIÓN (estilo Notion) — bloques JSON
+// ───────────────────────────────────────────────────────────
+
+model Document {
+  id             String     @id @default(cuid())
+  organizationId String     // denormalizado para RLS
+  projectId      String
+  type           DocType    @default(WIKI)
+  title          String
+  content        Json       @default("{}") // árbol de bloques (tiptap/blocknote)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, type])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// ACTIVIDAD & NOTIFICACIONES
+// ───────────────────────────────────────────────────────────
+
+model Activity {
+  id             String   @id @default(cuid())
+  organizationId String   // denormalizado para RLS
+  userId         String
+  entity         String   // "task" | "project" | ...
+  entityId       String
+  action         String   // "created" | "moved" | "commented" ...
+  source         String   @default("user") // "user" | "ai" | "system"
+  meta           Json     @default("{}")
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([organizationId])
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String           // denormalizado para RLS
+  userId         String
+  type           NotificationType
+  channel        NotificationChannel
+  payload        Json
+  read           Boolean          @default(false)
+  sentAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([userId, read])
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────────────
+// ENUMS
+// ───────────────────────────────────────────────────────────
+
+enum Plan {
+  FREE
+  TEAM
+  BUSINESS
+  ENTERPRISE
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  GUEST
+}
+
+enum ProjectStatus {
+  IDEA
+  PLANNING
+  EXECUTING
+  AT_RISK
+  PAUSED
+  DONE
+}
+
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  THIS_WEEK
+  TODAY
+  IN_PROGRESS
+  BLOCKED
+  IN_REVIEW
+  DONE
+}
+
+enum DependencyType {
+  FINISH_TO_START
+  START_TO_START
+  FINISH_TO_FINISH
+  START_TO_FINISH
+}
+
+enum TimeBlockState {
+  PLANNED
+  ACTIVE
+  DONE
+  SKIPPED
+}
+
+enum TimeBlockSource {
+  AUTO
+  MANUAL
+}
+
+enum DocType {
+  WIKI
+  MINUTES
+  PROCEDURE
+  LOGBOOK
+}
+
+enum NotificationType {
+  DUE_SOON
+  BLOCKED
+  OVERLOAD
+  CRITICAL_DEP
+  RISK
+}
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+  TEAMS
+  WHATSAPP
+  IN_APP
+}
