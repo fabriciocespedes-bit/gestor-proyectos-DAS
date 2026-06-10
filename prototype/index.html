@@ -216,7 +216,10 @@ const myBlocks=()=>TIMEBLOCKS.filter(b=>b.userId===CURRENT.id);
 const memberName=id=>MEMBERS.find(m=>m.id===id)?.name||'—';
 const memberArea=id=>MEMBERS.find(m=>m.id===id)?.area||'';
 const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
-const projectsOf=mid=>PROJECTS.filter(p=>p.ownerId===mid);
+// Responsables = funcionarios asignados (usuarios). El dueño/creador (admin) es el SUPERVISOR.
+const projResp=p=>(p.usuarios||[]).filter(id=>{const m=MEMBERS.find(x=>x.id===id);return m&&m.role!=='Directivo';});
+const projSupervisor=p=>{const w=WORKSPACES.find(x=>x.id===(p.workspaceId||'ws1'));return (w&&w.leader)||p.ownerId;};
+const projectsOf=mid=>PROJECTS.filter(p=>(p.usuarios||[]).includes(mid));
 const tasksOfProject=pid=>TASKS.filter(t=>t.projectId===pid);
 const instructionsAll=()=>TASKS.filter(t=>t.origin==='instruccion');
 const instructionsOf=mid=>TASKS.filter(t=>t.origin==='instruccion'&&t.who===mid);
@@ -411,7 +414,7 @@ function nuevoEvento(){openModal('Nuevo evento',[{name:'title',label:'Título',r
 // ═══ RENDIMIENTO DE EQUIPO (vista líder) ═══
 const miniStat=(l,v,c)=>`<div class="rounded-lg bg-${c}-50 py-1.5"><div class="text-lg font-bold text-${c}-600 tabular-nums leading-none">${v}</div><div class="text-[10px] text-slate-500 mt-0.5">${l}</div></div>`;
 function statOf(mid){const ts=memberTasks(mid);return {
-  proyectos:PROJECTS.filter(p=>p.ownerId===mid&&(p.workspaceId||'ws1')===CURRENT_WS).length,
+  proyectos:PROJECTS.filter(p=>(p.usuarios||[]).includes(mid)&&(p.workspaceId||'ws1')===CURRENT_WS).length,
   tareas:ts.length,
   pend:ts.filter(t=>efEstado(t)==='Pendiente').length,
   prog:ts.filter(t=>['En Progreso','En Revisión'].includes(t.estado)).length,
@@ -627,8 +630,8 @@ function renderProjects(){
   REDRAW=renderProjects; SCREEN_PROJECT=null;
   PROJECTS.forEach(p=>syncProjectStatus(p.id));
   const all=visibleProjects();
-  const whoOpts=[...new Set(all.map(p=>p.ownerId))];
-  const filtered=all.filter(p=>(!PROJ_F.estado||p.estado===PROJ_F.estado)&&(!PROJ_F.prioridad||p.prioridad===PROJ_F.prioridad)&&(!PROJ_F.who||p.ownerId===PROJ_F.who));
+  const whoOpts=[...new Set(all.flatMap(p=>projResp(p)))];
+  const filtered=all.filter(p=>(!PROJ_F.estado||p.estado===PROJ_F.estado)&&(!PROJ_F.prioridad||p.prioridad===PROJ_F.prioridad)&&(!PROJ_F.who||(p.usuarios||[]).includes(PROJ_F.who)));
   const shown=filtered.slice(0,PROJ_F.limit);
   const selCls="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:border-inst";
   main.innerHTML=`<div class="bg-white border-b border-slate-200 px-5 pt-4">
@@ -655,7 +658,7 @@ function projectsGrid(projs){
       return `<div onclick="renderProject('${p.id}')" class="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
         <div class="flex items-start justify-between gap-2 mb-2"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-${p.color}-500"></span><span class="font-semibold text-slate-800 leading-tight">${p.title}</span></div>
         <span class="px-2 py-0.5 rounded-full bg-${pc}-100 text-${pc}-700 text-[10px] font-medium shrink-0">${p.prioridad}</span></div>
-        <div class="text-xs text-slate-500 mb-2">${memberName(p.ownerId)} · ${memberArea(p.ownerId)}</div>
+        <div class="text-xs text-slate-500 mb-2">${(()=>{const r=projResp(p);return r.length?'👤 '+r.map(u=>memberName(u).split(' ')[0]).join(', '):'<span class="text-slate-400">Sin responsable</span>';})()}</div>
         <div class="flex items-center gap-2 text-[11px] text-slate-400 mb-2"><span class="px-2 py-0.5 rounded-full bg-${ec}-100 text-${ec}-700 font-medium">${p.estado}</span><span>📅 ${fdate(p.inicio)}–${fdate(p.fin)}</span></div>
         <div class="text-xs text-slate-500 mb-1">${money(p.presupuesto)} · ${ts.length} tareas</div>
         <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-${p.color}-500" style="width:${pct}%"></div></div>
@@ -676,7 +679,7 @@ function projectsTable(projs){
         <tbody>${g.items.map(p=>{const ts=tasksOfProject(p.id);const dn=ts.filter(t=>t.estado==='Completada').length;const pct=ts.length?Math.round(dn/ts.length*100):0;const pc=prioColor[p.prioridad];const ec2=estadoColor[p.estado];
           return `<tr onclick="renderProject('${p.id}')" class="border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer">
             <td class="p-3"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-${p.color}-500"></span><span class="font-medium text-slate-700">${p.title}</span></div></td>
-            <td class="p-3 text-center"><span class="w-7 h-7 inline-grid place-items-center rounded-full bg-inst/10 text-inst text-[10px] font-semibold" title="${memberName(p.ownerId)}">${memberName(p.ownerId).slice(0,2)}</span></td>
+            <td class="p-3 text-center">${(()=>{const r=projResp(p);return r.length?`<div class="inline-flex -space-x-1.5">${r.slice(0,3).map(u=>`<span class="w-7 h-7 grid place-items-center rounded-full bg-inst/10 text-inst text-[10px] font-semibold ring-2 ring-white" title="${memberName(u)}">${memberName(u).slice(0,2)}</span>`).join('')}${r.length>3?`<span class="w-7 h-7 grid place-items-center rounded-full bg-slate-100 text-slate-500 text-[9px] ring-2 ring-white">+${r.length-3}</span>`:''}</div>`:'<span class="text-[10px] text-slate-400">— sin resp.</span>';})()}</td>
             <td class="p-0 text-center bg-${ec2}-500"><div class="py-2.5 text-white text-[11px] font-semibold">${p.estado}</div></td>
             <td class="p-0 text-center bg-${pc}-500"><div class="py-2.5 text-white text-[11px] font-semibold">${p.prioridad}</div></td>
             <td class="p-3 text-center"><span class="inline-block bg-slate-800 text-white text-[10px] rounded-full px-2.5 py-1">${fdate(p.inicio)} – ${fdate(p.fin)}</span></td>
@@ -696,18 +699,18 @@ async function cambiarPrioridadProyecto(pid,v){const p=PROJECTS.find(x=>x.id===p
   if(dbErr(error,'No se pudo cambiar la prioridad')){await loadAll();renderProject(pid);return;}
   await dbAct('cambió la prioridad de',p.title); await loadAll(); renderProject(pid);}
 function editarResponsables(pid){const p=PROJECTS.find(x=>x.id===pid);if(!p||!canEditProject(p))return;
-  const sel={users:[...((p.usuarios&&p.usuarios.length)?p.usuarios:[p.ownerId])].filter(Boolean)};
+  const sel={users:[...projResp(p)]};
   document.getElementById('modalTitle').innerHTML='Responsables del proyecto';
   const form=document.getElementById('modalForm');
   const paint=u=>`ru rounded-lg border px-2.5 py-1.5 text-sm ${sel.users.includes(u)?'border-inst bg-inst text-white':'border-slate-200 text-slate-600'}`;
-  form.innerHTML=`<p class="text-xs text-slate-500 mb-2">Selecciona los responsables de «${p.title}». El primero será el responsable principal.</p>
-    <div class="flex flex-wrap gap-1.5">${MEMBERS.map(m=>`<button type="button" data-u="${m.id}" class="${paint(m.id)}">${m.name.split(' ')[0]}</button>`).join('')}</div>
+  const funcs=MEMBERS.filter(m=>m.role!=='Directivo');
+  form.innerHTML=`<p class="text-xs text-slate-500 mb-2">Selecciona los <b>funcionarios responsables</b> de «${p.title}» (uno o más). El supervisor es <b>${memberName(projSupervisor(p))}</b>.</p>
+    <div class="flex flex-wrap gap-1.5">${funcs.map(m=>`<button type="button" data-u="${m.id}" class="${paint(m.id)}">${m.name.split(' ')[0]}</button>`).join('')||'<span class="text-xs text-slate-400">No hay funcionarios aún. Créalos en Usuarios.</span>'}</div>
     <div class="flex justify-end gap-2 mt-5"><button type="button" onclick="closeModal()" class="rounded-lg border border-slate-200 text-slate-600 text-sm px-4 py-2 hover:bg-slate-50">Cancelar</button><button type="submit" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm font-medium px-4 py-2">Guardar</button></div>`;
-  form.querySelectorAll('.ru').forEach(b=>b.onclick=()=>{const u=b.dataset.u,i=sel.users.indexOf(u);if(i>=0){if(sel.users.length>1)sel.users.splice(i,1);}else sel.users.push(u);b.className=paint(u);});
+  form.querySelectorAll('.ru').forEach(b=>b.onclick=()=>{const u=b.dataset.u,i=sel.users.indexOf(u);if(i>=0)sel.users.splice(i,1);else sel.users.push(u);b.className=paint(u);});
   form.onsubmit=async e=>{e.preventDefault();closeModal();
     await sb.from('project_members').delete().eq('project_id',pid);
     if(sel.users.length)await sb.from('project_members').insert(sel.users.map(u=>({project_id:pid,profile_id:u})));
-    await sb.from('projects').update({owner_id:sel.users[0]}).eq('id',pid);
     await dbAct('actualizó los responsables de',p.title);
     await loadAll(); renderProject(pid);};
   document.getElementById('modalBackdrop').classList.remove('hidden');}
@@ -731,7 +734,8 @@ function renderProject(pid){
     <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
       ${canEditProject(p)?`<select onchange="cambiarEstadoProyecto('${pid}',this.value)" title="Estado de avance" class="rounded-lg border border-slate-200 px-2 py-1 outline-none focus:border-inst bg-white text-slate-700 cursor-pointer">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select>`:`<span class="px-2 py-0.5 rounded-full bg-${ec}-100 text-${ec}-700 font-medium">${p.estado}</span>`}
       ${canEditProject(p)?`<select onchange="cambiarPrioridadProyecto('${pid}',this.value)" title="Prioridad" class="rounded-lg border border-slate-200 px-2 py-1 outline-none focus:border-inst bg-white text-slate-700 cursor-pointer">${['Alta','Media','Baja'].map(x=>`<option value="${x}" ${p.prioridad===x?'selected':''}>Prioridad ${x}</option>`).join('')}</select>`:`<span class="px-2 py-0.5 rounded-full bg-${pc}-100 text-${pc}-700 font-medium">Prioridad ${p.prioridad}</span>`}
-      <span class="text-slate-500">👤 ${(p.usuarios&&p.usuarios.length?p.usuarios.map(u=>memberName(u).split(' ')[0]).join(', '):memberName(p.ownerId))}</span>${canEditProject(p)?`<button onclick="editarResponsables('${pid}')" class="text-inst hover:underline text-xs font-medium">✏ Responsables</button>`:''}
+      <span class="text-slate-500">🛡 Supervisor: ${memberName(projSupervisor(p))}</span>
+      <span class="text-slate-500">👤 ${(()=>{const r=projResp(p);return r.length?'Responsables: '+r.map(u=>memberName(u).split(' ')[0]).join(', '):'<span class="text-slate-400">Sin responsables</span>';})()}</span>${canEditProject(p)?`<button onclick="editarResponsables('${pid}')" class="text-inst hover:underline text-xs font-medium">✏ Responsables</button>`:''}
       <span class="text-slate-500">📅 ${fdate(p.inicio)}–${fdate(p.fin)}</span>
       <span class="text-slate-500">💰 ${money(p.presupuesto)}</span>${canEditProject(p)?`<button onclick="editarPresupuesto('${pid}')" class="text-inst hover:underline text-xs font-medium">✏ Editar presupuesto</button>`:''}</div>
     ${(()=>{const ex=projectGasto(p.id),pct=p.presupuesto?Math.round(ex/p.presupuesto*100):0,bc=pct>=90?'emerald':pct>=50?'amber':'rose';return `<div class="mt-2.5 max-w-lg">
@@ -1027,7 +1031,7 @@ function exportResumen(){
     <td class="c">${s.proyectos}</td><td class="c">${s.tareas}</td><td class="c">${s.pend}</td><td class="c">${s.prog}</td>
     <td class="c ok">${s.comp}</td><td class="c ${s.venc?'bad':''}">${s.venc}</td>${admin?`<td class="c"><b class="${l.flag==='rose'?'bad':l.flag==='amber'?'warn':'ok'}">${l.pct}%</b></td>`:''}</tr>`;}).join('')||`<tr><td colspan="${admin?9:8}" class="c sub">Sin funcionarios.</td></tr>`;
   const rowsProj=projs.map(p=>{const ts=tasksOfProject(p.id);const dn=ts.filter(t=>t.estado==='Completada').length;const prog=ts.length?Math.round(dn/ts.length*100):0;const ej=projectGasto(p.id);const ep=p.presupuesto?Math.round(ej/p.presupuesto*100):0;return `<tr>
-    <td class="l"><b>${p.title}</b></td><td>${memberName(p.ownerId)}</td><td>${p.estado}</td><td>${p.prioridad}</td>
+    <td class="l"><b>${p.title}</b></td><td>${(()=>{const r=projResp(p);return r.length?r.map(memberName).join(', '):'—';})()}</td><td>${p.estado}</td><td>${p.prioridad}</td>
     <td class="c">${fdate(p.inicio)}–${fdate(p.fin)}</td><td class="r">${money(p.presupuesto)}</td>
     <td class="r">${money(ej)} <span class="sub">(${ep}%)</span></td><td class="c">${prog}%</td></tr>`;}).join('')||`<tr><td colspan="8" class="c sub">Sin proyectos.</td></tr>`;
   const logo=location.origin+'/logo-municipalidad.png';
@@ -1075,8 +1079,8 @@ function renderReports(){REDRAW=renderReports;
   const myTasks=admin?TASKS:TASKS.filter(t=>t.who===CURRENT.id);
   const venc=myTasks.filter(isVencida).length;
   const kpi=(l,v,i)=>`<div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div class="flex items-center justify-between"><span class="text-xs text-slate-500">${l}</span><span class="text-slate-300">${i}</span></div><div class="text-2xl font-bold text-slate-900 mt-1 tabular-nums">${v}</div></div>`;
-  const whoOpts=[...new Set(src.map(p=>p.ownerId))];
-  const filtered=src.filter(p=>(!REP_F.who||p.ownerId===REP_F.who)&&(!REP_F.estado||p.estado===REP_F.estado)&&(!REP_F.prioridad||p.prioridad===REP_F.prioridad));
+  const whoOpts=[...new Set(src.flatMap(p=>projResp(p)))];
+  const filtered=src.filter(p=>(!REP_F.who||(p.usuarios||[]).includes(REP_F.who))&&(!REP_F.estado||p.estado===REP_F.estado)&&(!REP_F.prioridad||p.prioridad===REP_F.prioridad));
   const shown=filtered.slice(0,REP_F.limit);
   const selCls="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:border-inst";
   main.innerHTML=`<div class="p-6 max-w-6xl mx-auto">
@@ -1100,7 +1104,7 @@ function renderReports(){REDRAW=renderReports;
         <th class="font-semibold p-3">Inicio</th><th class="font-semibold p-3">Fin</th><th class="font-semibold p-3">Estado</th>
         <th class="font-semibold p-3">Prioridad</th><th class="font-semibold p-3 pr-4">Presupuesto</th></tr></thead>
       <tbody>${shown.length?shown.map(p=>{const ec=estadoColor[p.estado],pc=prioColor[p.prioridad];return `<tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-        <td class="p-3 font-medium text-slate-700">${p.title}</td><td class="p-3 text-slate-500">${memberName(p.ownerId)}</td>
+        <td class="p-3 font-medium text-slate-700">${p.title}</td><td class="p-3 text-slate-500">${(()=>{const r=projResp(p);return r.length?r.map(memberName).join(', '):'—';})()}</td>
         <td class="p-3 text-center text-slate-500">${fdate(p.inicio)}</td><td class="p-3 text-center text-slate-500">${fdate(p.fin)}</td>
         <td class="p-3 text-center"><span class="px-2 py-0.5 rounded-full bg-${ec}-100 text-${ec}-700 text-[11px]">${p.estado}</span></td>
         <td class="p-3 text-center"><span class="px-2 py-0.5 rounded-full bg-${pc}-100 text-${pc}-700 text-[11px]">${p.prioridad}</span></td>
@@ -1196,7 +1200,7 @@ function openRichForm(opts){
 }
 function nuevoProyecto(){ openProjectForm(); }
 function openProjectForm(){
-  const sel={usuarios:[CURRENT.id],etiquetas:[]};
+  const sel={usuarios:[],etiquetas:[]};
   const ETI=['Municipio','Salud','Terreno','Interno','Documental'];
   const ic='w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst focus:ring-2 focus:ring-inst/15';
   const lbl=t=>`<div class="text-[11px] font-bold tracking-wide text-slate-500 uppercase mb-1">${t}</div>`;
@@ -1212,7 +1216,7 @@ function openProjectForm(){
       <div>${lbl('Termina el')}<input id="pf_fin" type="date" class="${ic}"/></div>
     </div>
     <div class="mt-3">${lbl('Accesibilidad del proyecto')}<select id="pf_acc" class="${ic}"><option>Usuarios asignados</option><option>Todos los usuarios</option><option>Solo yo</option></select></div>
-    <div class="mt-3">${lbl('Seleccionar usuarios')}<div class="flex flex-wrap gap-1.5">${MEMBERS.map(m=>`<button type="button" data-u="${m.id}" class="usr rounded-lg border px-2.5 py-1.5 text-sm ${sel.usuarios.includes(m.id)?'border-inst bg-inst text-white':'border-slate-200 text-slate-600'}">${m.name.split(' ')[0]}</button>`).join('')}</div></div>
+    <div class="mt-3">${lbl('Responsables (funcionarios) <span class=text-slate-400>· tú quedas como supervisor</span>')}<div class="flex flex-wrap gap-1.5">${MEMBERS.filter(m=>m.role!=='Directivo').map(m=>`<button type="button" data-u="${m.id}" class="usr rounded-lg border px-2.5 py-1.5 text-sm ${sel.usuarios.includes(m.id)?'border-inst bg-inst text-white':'border-slate-200 text-slate-600'}">${m.name.split(' ')[0]}</button>`).join('')||'<span class="text-xs text-slate-400">No hay funcionarios aún. Créalos en Usuarios.</span>'}</div></div>
     <div class="mt-3">${lbl('Seleccionar etiquetas')}<div class="flex flex-wrap gap-1.5">${ETI.map(e=>`<button type="button" data-e="${e}" class="eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${labelColor(e)}-300 text-${labelColor(e)}-700">${e}</button>`).join('')}</div></div>
     <div class="mt-3">${lbl('Descripción')}<div class="rounded-lg border border-slate-200 overflow-hidden">
       <div class="flex items-center gap-2.5 px-3 py-1.5 border-b border-slate-100 text-slate-400 text-sm bg-slate-50">🔗 <span class="text-slate-300">|</span> <b class="text-slate-500">B</b> <i class="text-slate-500">I</i> <span class="text-slate-300">|</span> ☰</div>
@@ -1224,7 +1228,7 @@ function openProjectForm(){
   form.querySelectorAll('.eti2').forEach(b=>b.onclick=()=>{const e=b.dataset.e,lc=labelColor(e),i=sel.etiquetas.indexOf(e);if(i>=0){sel.etiquetas.splice(i,1);b.className=`eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${lc}-300 text-${lc}-700`;}else{sel.etiquetas.push(e);b.className=`eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${lc}-500 bg-${lc}-500 text-white`;}});
   form.onsubmit=async e=>{e.preventDefault();const title=document.getElementById('pf_title').value.trim();if(!title){document.getElementById('pf_title').focus();return;}
     const cols=['emerald','blue','amber','rose','violet'];closeModal();
-    const {data:np,error}=await sb.from('projects').insert({workspace_id:CURRENT_WS,title,owner_id:sel.usuarios[0],estado:document.getElementById('pf_estado').value,prioridad:document.getElementById('pf_prio').value||'Media',inicio:document.getElementById('pf_ini').value||HOY,fin:document.getElementById('pf_fin').value||null,presupuesto:+document.getElementById('pf_pres').value||0,etiquetas:sel.etiquetas,color:cols[PROJECTS.length%cols.length],descripcion:document.getElementById('pf_desc').value}).select().single();
+    const {data:np,error}=await sb.from('projects').insert({workspace_id:CURRENT_WS,title,owner_id:CURRENT.id,estado:document.getElementById('pf_estado').value,prioridad:document.getElementById('pf_prio').value||'Media',inicio:document.getElementById('pf_ini').value||HOY,fin:document.getElementById('pf_fin').value||null,presupuesto:+document.getElementById('pf_pres').value||0,etiquetas:sel.etiquetas,color:cols[PROJECTS.length%cols.length],descripcion:document.getElementById('pf_desc').value}).select().single();
     if(dbErr(error,'No se pudo crear el proyecto'))return;
     if(sel.usuarios.length){await sb.from('project_members').insert(sel.usuarios.map(u=>({project_id:np.id,profile_id:u})));}
     await dbAct('creó el proyecto',title);
