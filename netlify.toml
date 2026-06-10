@@ -1,20 +1,26 @@
-# ── Netlify · ProjectOS (frontend Next.js, monorepo pnpm) ───────────────
-# El backend es Supabase (Postgres + Auth + Storage + Edge Functions).
+# ── Netlify · DAS Control de Gestión Sanitaria (Pozo Almonte) ───────────
+# Despliegue HÍBRIDO: sitio estático (prototype/) + backend Supabase.
+# La conexión a Supabase (URL + clave pública) ya va dentro de index.html,
+# por eso NO se requieren variables de entorno ni build.
 
 [build]
-  # Instala el workspace completo en la raíz y construye solo la web.
-  command = "pnpm install --frozen-lockfile=false && pnpm --filter @projectos/web build"
-  publish = "apps/web/.next"
+  # Publica la carpeta del prototipo tal cual (HTML + assets). Sin compilación.
+  publish = "prototype"
+  command = ""
 
-[build.environment]
-  NODE_VERSION = "20"
-  PNPM_VERSION = "9"
-  # Acelera el build evitando telemetría.
-  NEXT_TELEMETRY_DISABLED = "1"
+# Cualquier ruta sirve la app (es una sola página).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
 
-# Runtime oficial de Next.js en Netlify (SSR, middleware, edge).
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
+# Cabeceras de seguridad básicas.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
 
-# Variables NEXT_PUBLIC_* se definen en el panel de Netlify (Site settings →
-# Environment variables). Ver .env.example y DEPLOY.md.
+# Nota: el frontend Next.js en apps/web queda como alternativa futura
+# (su build usaba @netlify/plugin-nextjs). Hoy el producto es el prototipo.
