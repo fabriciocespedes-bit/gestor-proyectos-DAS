@@ -210,9 +210,11 @@ let NOTES=[];
 // ── Reuniones / Eventos de calendario ──
 let MEETINGS=[];
 let EVENTS=[];
+let PRIOLIST=[]; // lista personal de prioridades (checklist), independiente de tareas
 const myBlocks=()=>TIMEBLOCKS.filter(b=>b.userId===CURRENT.id);
 
 // ═══════════════ HELPERS ═══════════════
+const escP=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const memberName=id=>MEMBERS.find(m=>m.id===id)?.name||'—';
 const memberArea=id=>MEMBERS.find(m=>m.id===id)?.area||'';
 const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
@@ -570,6 +572,18 @@ function renderPrioridades(){REDRAW=renderPrioridades;
         ${urg.map(([l,v,c])=>`<div class="flex items-center gap-2 mb-2.5"><span class="w-20 text-xs text-slate-600">${l}</span><div class="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div class="h-full rounded" style="width:${Math.round(v/maxU*100)}%;background:${c}"></div></div><span class="w-6 text-right text-xs tabular-nums text-slate-500">${v}</span></div>`).join('')}
       </div>
     </div>
+    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm mb-5">
+      <h3 class="text-sm font-bold text-slate-700 mb-3">📝 Mi lista de prioridades <span class="font-normal text-slate-400 text-xs">· anotaciones personales, independientes de las tareas</span></h3>
+      <div class="flex gap-2 mb-3">
+        <input id="prio_in" placeholder="Anota algo a priorizar…" onkeydown="if(event.key==='Enter')addPrioItem()" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst"/>
+        <button onclick="addPrioItem()" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm px-3 font-medium">Agregar</button></div>
+      <div class="space-y-1.5">${PRIOLIST.length?PRIOLIST.map(it=>`<div class="flex items-center gap-2 group">
+        <input type="checkbox" ${it.done?'checked':''} onchange="togglePrioItem('${it.id}',this.checked)" class="accent-[#1e3a8a] w-4 h-4 shrink-0 cursor-pointer"/>
+        <span class="flex-1 text-sm ${it.done?'line-through text-slate-400':'text-slate-700'}">${escP(it.text)}</span>
+        ${it.done&&it.doneAt?`<span class="text-[10px] text-emerald-600 shrink-0">✓ ${fdate(String(it.doneAt).slice(0,10))}</span>`:''}
+        <button onclick="delPrioItem('${it.id}')" title="Eliminar" class="text-slate-300 hover:text-rose-500 text-sm shrink-0 opacity-60 group-hover:opacity-100">×</button>
+      </div>`).join(''):'<div class="text-xs text-slate-400">Sin anotaciones todavía. Escribe arriba y pulsa Agregar.</div>'}</div>
+    </div>
     <div class="grid md:grid-cols-2 gap-4">
       ${quad('🔴 Hacer ahora','Importante y urgente','rose',q.hu)}
       ${quad('🔵 Planificar','Importante, sin apuro','blue',q.hn)}
@@ -579,6 +593,15 @@ function renderPrioridades(){REDRAW=renderPrioridades;
     <div class="text-[11px] text-slate-400 mt-3">Importante = prioridad <b>Alta</b> · Urgente = vencida o vence en ≤3 días · Las completadas no aparecen. Haz clic en una tarea para abrirla.</div>
   </div>`;
 }
+async function addPrioItem(){const i=document.getElementById('prio_in');const t=(i.value||'').trim();if(!t)return;
+  const {error}=await sb.from('priority_items').insert({owner_id:CURRENT.id,text:t,position:PRIOLIST.length});
+  if(dbErr(error,'No se pudo agregar a la lista'))return;
+  await loadAll(); renderPrioridades(); const ni=document.getElementById('prio_in'); if(ni)ni.focus();}
+async function togglePrioItem(id,done){
+  const {error}=await sb.from('priority_items').update({done,done_at:done?new Date().toISOString():null}).eq('id',id);
+  if(error){await loadAll();renderPrioridades();return;}
+  await loadAll(); renderPrioridades();}
+async function delPrioItem(id){await sb.from('priority_items').delete().eq('id',id);await loadAll();renderPrioridades();}
 // ═══ REGISTRO DE ACTIVIDADES ═══
 function renderActivity(){REDRAW=renderActivity; purgeActivity();
   main.innerHTML=`<div class="p-6 max-w-3xl mx-auto"><h1 class="text-xl font-bold text-slate-900 mb-1">Registro de actividades</h1>
@@ -1500,8 +1523,8 @@ async function logout(){try{await sb.auth.signOut();}catch(e){}CURRENT=null;docu
 // ═══ Carga de datos reales desde Supabase ═══
 async function loadAll(){
   const q=async (t,sel='*')=>{const{data,error}=await sb.from(t).select(sel);if(error)console.warn('load '+t,error.message);return data||[];};
-  const [profs,wss,wms,prs,pms,tks,subs,exps,obs,tfs,mts,mas,evs,nts,tbs,acts]=await Promise.all(
-    ['profiles','workspaces','workspace_members','projects','project_members','tasks','subtasks','task_expenses','task_observations','task_files','meetings','meeting_attendees','events','notes','time_blocks','activities'].map(t=>q(t)));
+  const [profs,wss,wms,prs,pms,tks,subs,exps,obs,tfs,mts,mas,evs,nts,tbs,acts,pris]=await Promise.all(
+    ['profiles','workspaces','workspace_members','projects','project_members','tasks','subtasks','task_expenses','task_observations','task_files','meetings','meeting_attendees','events','notes','time_blocks','activities','priority_items'].map(t=>q(t)));
   MEMBERS=profs.map(p=>({id:p.id,name:p.name,role:p.role==='admin'?'Directivo':'Funcionario',area:p.area||'',cargo:p.cargo||'',email:p.email}));
   WORKSPACES=wss.map(w=>({id:w.id,name:w.name,primary:w.is_primary,leader:w.leader_id,userIds:wms.filter(m=>m.workspace_id===w.id).map(m=>m.profile_id)}));
   PROJECTS=prs.map(p=>({id:p.id,title:p.title,ownerId:p.owner_id,estado:p.estado,prioridad:p.prioridad,inicio:p.inicio,fin:p.fin,presupuesto:p.presupuesto,color:p.color||'blue',etiquetas:p.etiquetas||[],desc:p.descripcion||'',workspaceId:p.workspace_id,usuarios:pms.filter(m=>m.project_id===p.id).map(m=>m.profile_id)}));
@@ -1516,6 +1539,7 @@ async function loadAll(){
   NOTES=nts.map(n=>({id:n.id,userId:n.owner_id,title:n.title,body:n.body,updated:n.updated_at}));
   TIMEBLOCKS=tbs.map(b=>({id:b.id,userId:b.owner_id,day:b.day,start:+b.start_h,end:+b.end_h,title:b.title,color:b.color}));
   ACTIVITY=acts.sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).map(a=>({who:a.actor_id,action:a.action,obj:a.object_text,ts:'',at:new Date(a.created_at).getTime()}));
+  PRIOLIST=pris.sort((a,b)=>(a.position-b.position)||((a.created_at||'').localeCompare(b.created_at||''))).map(x=>({id:x.id,text:x.text,done:x.done,doneAt:x.done_at,position:x.position}));
 }
 async function dbAct(action,obj){ try{ await sb.from('activities').insert({actor_id:CURRENT.id, action, object_text:obj}); }catch(e){} }
 function dbErr(error,msg){ if(error){ confirmModal('No se pudo guardar', (msg||'Ocurrió un error')+': '+error.message, ()=>{}, 'Entendido'); return true; } return false; }
