@@ -574,6 +574,19 @@ function renderPrioridades(){REDRAW=renderPrioridades;
         <p class="text-[11px] text-slate-400 mt-3">Cada tarea se ubica según su <b>prioridad</b> (importante = Alta) y su <b>plazo</b> (urgente = vence en ≤3 días o ya venció). Los colores coinciden con los de tu matriz de abajo.</p>
       </div>
     </details>
+    <div class="rounded-xl border-2 border-inst/30 bg-white p-4 shadow-sm mb-5">
+      <h3 class="text-sm font-bold text-slate-700 mb-0.5">📝 Mis prioridades del día <span class="font-normal text-slate-400 text-xs">· lista personal · independiente de las tareas</span></h3>
+      <p class="text-[11px] text-slate-400 mb-3">Escríbelas, márcalas al terminar, edítalas (clic en el texto) o elimínalas.</p>
+      <div class="flex gap-2 mb-3">
+        <input id="prio_in" placeholder="Escribe una prioridad y pulsa Agregar…" onkeydown="if(event.key==='Enter')addPrioItem()" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst"/>
+        <button onclick="addPrioItem()" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm px-4 font-medium">Agregar</button></div>
+      <div class="space-y-1.5">${PRIOLIST.length?PRIOLIST.map(it=>`<div class="flex items-center gap-2 group">
+        <input type="checkbox" ${it.done?'checked':''} onchange="togglePrioItem('${it.id}',this.checked)" class="accent-[#1e3a8a] w-4 h-4 shrink-0 cursor-pointer"/>
+        <input value="${escP(it.text)}" onchange="editPrioItem('${it.id}',this.value)" placeholder="(vacío para eliminar)" class="flex-1 min-w-0 bg-transparent outline-none border-b border-transparent focus:border-slate-200 text-sm ${it.done?'line-through text-slate-400':'text-slate-700'}"/>
+        ${it.done&&it.doneAt?`<span class="text-[10px] text-emerald-600 shrink-0">✓ ${fdate(String(it.doneAt).slice(0,10))}</span>`:''}
+        <button onclick="delPrioItem('${it.id}')" title="Eliminar" class="text-slate-300 hover:text-rose-500 text-base shrink-0 opacity-60 group-hover:opacity-100">×</button>
+      </div>`).join(''):'<div class="text-xs text-slate-400">Aún no hay prioridades. Escribe arriba y pulsa Agregar.</div>'}</div>
+    </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       ${stat('Prioridades activas',total,'slate','📌')}${stat('Hacer ahora',q.hu.length,'rose','🔥')}${stat('Vencidas',venc,'rose','⚠')}${stat('Vencen hoy',hoy,'amber','🕒')}
     </div>
@@ -588,18 +601,6 @@ function renderPrioridades(){REDRAW=renderPrioridades;
         <h3 class="text-sm font-bold text-slate-700 mb-3">⏰ Urgencia de plazos</h3>
         ${urg.map(([l,v,c])=>`<div class="flex items-center gap-2 mb-2.5"><span class="w-20 text-xs text-slate-600">${l}</span><div class="flex-1 h-4 bg-slate-100 rounded overflow-hidden"><div class="h-full rounded" style="width:${Math.round(v/maxU*100)}%;background:${c}"></div></div><span class="w-6 text-right text-xs tabular-nums text-slate-500">${v}</span></div>`).join('')}
       </div>
-    </div>
-    <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm mb-5">
-      <h3 class="text-sm font-bold text-slate-700 mb-3">📝 Mi lista de prioridades <span class="font-normal text-slate-400 text-xs">· anotaciones personales, independientes de las tareas</span></h3>
-      <div class="flex gap-2 mb-3">
-        <input id="prio_in" placeholder="Anota algo a priorizar…" onkeydown="if(event.key==='Enter')addPrioItem()" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst"/>
-        <button onclick="addPrioItem()" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm px-3 font-medium">Agregar</button></div>
-      <div class="space-y-1.5">${PRIOLIST.length?PRIOLIST.map(it=>`<div class="flex items-center gap-2 group">
-        <input type="checkbox" ${it.done?'checked':''} onchange="togglePrioItem('${it.id}',this.checked)" class="accent-[#1e3a8a] w-4 h-4 shrink-0 cursor-pointer"/>
-        <span class="flex-1 text-sm ${it.done?'line-through text-slate-400':'text-slate-700'}">${escP(it.text)}</span>
-        ${it.done&&it.doneAt?`<span class="text-[10px] text-emerald-600 shrink-0">✓ ${fdate(String(it.doneAt).slice(0,10))}</span>`:''}
-        <button onclick="delPrioItem('${it.id}')" title="Eliminar" class="text-slate-300 hover:text-rose-500 text-sm shrink-0 opacity-60 group-hover:opacity-100">×</button>
-      </div>`).join(''):'<div class="text-xs text-slate-400">Sin anotaciones todavía. Escribe arriba y pulsa Agregar.</div>'}</div>
     </div>
     <div class="grid md:grid-cols-2 gap-4">
       ${quad('🔴 Hacer ahora','Importante y urgente','rose',q.hu)}
@@ -618,6 +619,11 @@ async function togglePrioItem(id,done){
   const {error}=await sb.from('priority_items').update({done,done_at:done?new Date().toISOString():null}).eq('id',id);
   if(error){await loadAll();renderPrioridades();return;}
   await loadAll(); renderPrioridades();}
+async function editPrioItem(id,text){const t=(text||'').trim();const it=PRIOLIST.find(x=>x.id===id);if(!it)return;
+  if(!t){await delPrioItem(id);return;}
+  if(it.text===t)return; it.text=t;
+  const {error}=await sb.from('priority_items').update({text:t}).eq('id',id);
+  if(error){await loadAll();renderPrioridades();}}
 async function delPrioItem(id){await sb.from('priority_items').delete().eq('id',id);await loadAll();renderPrioridades();}
 // ═══ REGISTRO DE ACTIVIDADES ═══
 function renderActivity(){REDRAW=renderActivity; purgeActivity();
