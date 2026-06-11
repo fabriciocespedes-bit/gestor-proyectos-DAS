@@ -839,6 +839,7 @@ function renderProject(pid){
     <div class="flex items-center justify-between mt-1">
       <div class="flex items-center gap-2"><span class="w-3.5 h-3.5 rounded-full bg-${p.color}-500"></span><h1 class="text-xl font-bold text-slate-900">${p.title}</h1></div>
       <div class="flex items-center gap-2">
+        ${canEditProject(p)?`<button onclick="openProjectForm('${pid}')" class="rounded-lg border border-slate-200 text-slate-600 hover:border-inst hover:text-inst text-sm px-3 py-2">✏ Editar</button>`:''}
         ${canEditProject(p)?`<button onclick="delProject('${pid}')" class="rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm px-3 py-2">🗑 Eliminar</button>`:''}
         ${canEditProject(p)?'<button onclick="addTask()" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm font-medium px-3 py-2">+ Tarea</button>':'<span class="text-xs text-slate-400 flex items-center gap-1 bg-slate-100 px-2.5 py-1.5 rounded-lg">🔒 Solo lectura</span>'}
       </div>
@@ -1311,40 +1312,55 @@ function openRichForm(opts){
   setTimeout(()=>document.getElementById('rf_q').focus(),40);
 }
 function nuevoProyecto(){ openProjectForm(); }
-function openProjectForm(){
-  const sel={usuarios:[],etiquetas:[]};
+function openProjectForm(editId){
+  const p = editId ? PROJECTS.find(x=>x.id===editId) : null;
+  if(editId && (!p || !canEditProject(p))) return;
+  const sel={usuarios: p?[...projResp(p)]:[], etiquetas: p?[...(p.etiquetas||[])]:[]};
   const ETI=['Municipio','Salud','Terreno','Interno','Documental'];
   const ic='w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst focus:ring-2 focus:ring-inst/15';
   const lbl=t=>`<div class="text-[11px] font-bold tracking-wide text-slate-500 uppercase mb-1">${t}</div>`;
-  document.getElementById('modalTitle').innerHTML=`<span class="text-slate-800">Crear proyecto</span>`;
+  const estado0=p?p.estado:'Pendiente', prio0=p?p.prioridad:'Media';
+  const etiCls=e=>sel.etiquetas.includes(e)?`border-${labelColor(e)}-500 bg-${labelColor(e)}-500 text-white`:`border-${labelColor(e)}-300 text-${labelColor(e)}-700`;
+  document.getElementById('modalTitle').innerHTML=`<span class="text-slate-800">${p?'Editar proyecto':'Crear proyecto'}</span>`;
   const form=document.getElementById('modalForm');
   form.innerHTML=`
     <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-      <div>${lbl('Título <span class=text-rose-500>*</span>')}<input id="pf_title" required placeholder="Por favor ingrese el título" class="${ic}"/></div>
-      <div>${lbl('Estado <span class=text-rose-500>*</span>')}<select id="pf_estado" class="${ic}">${ESTADOS.map(e=>`<option ${e==='Pendiente'?'selected':''}>${e}</option>`).join('')}</select></div>
-      <div>${lbl('Prioridad')}<select id="pf_prio" class="${ic}"><option value="">Por favor seleccione</option>${['Alta','Media','Baja'].map(p=>`<option ${p==='Media'?'selected':''}>${p}</option>`).join('')}</select></div>
-      <div>${lbl('Presupuesto')}<div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span><input id="pf_pres" type="number" placeholder="Ingrese el presupuesto" class="${ic} pl-7"/></div></div>
-      <div>${lbl('Empieza el')}<input id="pf_ini" type="date" value="${HOY}" class="${ic}"/></div>
-      <div>${lbl('Termina el')}<input id="pf_fin" type="date" class="${ic}"/></div>
+      <div>${lbl('Título <span class=text-rose-500>*</span>')}<input id="pf_title" required placeholder="Por favor ingrese el título" value="${p?escP(p.title):''}" class="${ic}"/></div>
+      <div>${lbl('Estado <span class=text-rose-500>*</span>')}<select id="pf_estado" class="${ic}">${ESTADOS.map(e=>`<option ${e===estado0?'selected':''}>${e}</option>`).join('')}</select></div>
+      <div>${lbl('Prioridad')}<select id="pf_prio" class="${ic}">${['Alta','Media','Baja'].map(x=>`<option ${x===prio0?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div>${lbl('Presupuesto')}<div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span><input id="pf_pres" type="number" placeholder="Ingrese el presupuesto" value="${p?(p.presupuesto||0):''}" class="${ic} pl-7"/></div></div>
+      <div>${lbl('Empieza el')}<input id="pf_ini" type="date" value="${p?(p.inicio||''):HOY}" class="${ic}"/></div>
+      <div>${lbl('Termina el')}<input id="pf_fin" type="date" value="${p?(p.fin||''):''}" class="${ic}"/></div>
     </div>
     <div class="mt-3">${lbl('Accesibilidad del proyecto')}<select id="pf_acc" class="${ic}"><option>Usuarios asignados</option><option>Todos los usuarios</option><option>Solo yo</option></select></div>
     <div class="mt-3">${lbl('Responsables (funcionarios) <span class=text-slate-400>· tú quedas como supervisor</span>')}<div class="flex flex-wrap gap-1.5">${MEMBERS.filter(m=>m.role!=='Directivo').map(m=>`<button type="button" data-u="${m.id}" class="usr rounded-lg border px-2.5 py-1.5 text-sm ${sel.usuarios.includes(m.id)?'border-inst bg-inst text-white':'border-inst/40 bg-inst/5 text-inst font-medium'}">${m.name.split(' ')[0]}</button>`).join('')||'<span class="text-xs text-slate-400">No hay funcionarios aún. Créalos en Usuarios.</span>'}</div></div>
-    <div class="mt-3">${lbl('Seleccionar etiquetas')}<div class="flex flex-wrap gap-1.5">${ETI.map(e=>`<button type="button" data-e="${e}" class="eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${labelColor(e)}-300 text-${labelColor(e)}-700">${e}</button>`).join('')}</div></div>
+    <div class="mt-3">${lbl('Seleccionar etiquetas')}<div class="flex flex-wrap gap-1.5">${ETI.map(e=>`<button type="button" data-e="${e}" class="eti2 rounded-lg border px-2.5 py-1.5 text-sm ${etiCls(e)}">${e}</button>`).join('')}</div></div>
     <div class="mt-3">${lbl('Descripción')}<div class="rounded-lg border border-slate-200 overflow-hidden">
       <div class="flex items-center gap-2.5 px-3 py-1.5 border-b border-slate-100 text-slate-400 text-sm bg-slate-50">🔗 <span class="text-slate-300">|</span> <b class="text-slate-500">B</b> <i class="text-slate-500">I</i> <span class="text-slate-300">|</span> ☰</div>
-      <textarea id="pf_desc" rows="3" placeholder="Por favor ingrese la descripción" class="w-full px-3 py-2 text-sm outline-none"></textarea></div></div>
+      <textarea id="pf_desc" rows="3" placeholder="Por favor ingrese la descripción" class="w-full px-3 py-2 text-sm outline-none">${p?escP(p.desc||''):''}</textarea></div></div>
     <div class="flex justify-end gap-2 mt-5">
       <button type="button" onclick="closeModal()" class="rounded-lg border border-slate-200 text-slate-600 text-sm px-4 py-2 hover:bg-slate-50">Cancelar</button>
-      <button type="submit" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm font-semibold px-4 py-2">Crear proyecto</button></div>`;
-  form.querySelectorAll('.usr').forEach(b=>b.onclick=()=>{const u=b.dataset.u,i=sel.usuarios.indexOf(u);if(i>=0){if(sel.usuarios.length>1)sel.usuarios.splice(i,1);}else sel.usuarios.push(u);b.className=`usr rounded-lg border px-2.5 py-1.5 text-sm ${sel.usuarios.includes(u)?'border-inst bg-inst text-white':'border-inst/40 bg-inst/5 text-inst font-medium'}`;});
-  form.querySelectorAll('.eti2').forEach(b=>b.onclick=()=>{const e=b.dataset.e,lc=labelColor(e),i=sel.etiquetas.indexOf(e);if(i>=0){sel.etiquetas.splice(i,1);b.className=`eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${lc}-300 text-${lc}-700`;}else{sel.etiquetas.push(e);b.className=`eti2 rounded-lg border px-2.5 py-1.5 text-sm border-${lc}-500 bg-${lc}-500 text-white`;}});
+      <button type="submit" class="rounded-lg bg-inst hover:bg-inst-dark text-white text-sm font-semibold px-4 py-2">${p?'Guardar cambios':'Crear proyecto'}</button></div>`;
+  form.querySelectorAll('.usr').forEach(b=>b.onclick=()=>{const u=b.dataset.u,i=sel.usuarios.indexOf(u);if(i>=0)sel.usuarios.splice(i,1);else sel.usuarios.push(u);b.className=`usr rounded-lg border px-2.5 py-1.5 text-sm ${sel.usuarios.includes(u)?'border-inst bg-inst text-white':'border-inst/40 bg-inst/5 text-inst font-medium'}`;});
+  form.querySelectorAll('.eti2').forEach(b=>b.onclick=()=>{const e=b.dataset.e,i=sel.etiquetas.indexOf(e);if(i>=0)sel.etiquetas.splice(i,1);else sel.etiquetas.push(e);b.className=`eti2 rounded-lg border px-2.5 py-1.5 text-sm ${etiCls(e)}`;});
   form.onsubmit=async e=>{e.preventDefault();const title=document.getElementById('pf_title').value.trim();if(!title){document.getElementById('pf_title').focus();return;}
-    const cols=['emerald','blue','amber','rose','violet'];closeModal();
-    const {data:np,error}=await sb.from('projects').insert({workspace_id:CURRENT_WS,title,owner_id:CURRENT.id,estado:document.getElementById('pf_estado').value,prioridad:document.getElementById('pf_prio').value||'Media',inicio:document.getElementById('pf_ini').value||HOY,fin:document.getElementById('pf_fin').value||null,presupuesto:+document.getElementById('pf_pres').value||0,etiquetas:sel.etiquetas,color:cols[PROJECTS.length%cols.length],descripcion:document.getElementById('pf_desc').value}).select().single();
-    if(dbErr(error,'No se pudo crear el proyecto'))return;
-    if(sel.usuarios.length){await sb.from('project_members').insert(sel.usuarios.map(u=>({project_id:np.id,profile_id:u})));}
-    await dbAct('creó el proyecto',title);
-    await loadAll(); renderProjects();};
+    const payload={title,estado:document.getElementById('pf_estado').value,prioridad:document.getElementById('pf_prio').value||'Media',inicio:document.getElementById('pf_ini').value||HOY,fin:document.getElementById('pf_fin').value||null,presupuesto:+document.getElementById('pf_pres').value||0,etiquetas:sel.etiquetas,descripcion:document.getElementById('pf_desc').value};
+    closeModal();
+    if(p){
+      const {error}=await sb.from('projects').update(payload).eq('id',p.id);
+      if(dbErr(error,'No se pudo guardar el proyecto'))return;
+      await sb.from('project_members').delete().eq('project_id',p.id);
+      if(sel.usuarios.length)await sb.from('project_members').insert(sel.usuarios.map(u=>({project_id:p.id,profile_id:u})));
+      await dbAct('editó el proyecto',title);
+      await loadAll(); renderProject(p.id);
+    } else {
+      const cols=['emerald','blue','amber','rose','violet'];
+      const {data:np,error}=await sb.from('projects').insert({...payload,workspace_id:CURRENT_WS,owner_id:CURRENT.id,color:cols[PROJECTS.length%cols.length]}).select().single();
+      if(dbErr(error,'No se pudo crear el proyecto'))return;
+      if(sel.usuarios.length){await sb.from('project_members').insert(sel.usuarios.map(u=>({project_id:np.id,profile_id:u})));}
+      await dbAct('creó el proyecto',title);
+      await loadAll(); renderProjects();
+    }};
   document.getElementById('modalBackdrop').classList.remove('hidden');
   setTimeout(()=>document.getElementById('pf_title').focus(),40);
 }
