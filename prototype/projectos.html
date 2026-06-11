@@ -219,6 +219,7 @@ let EVENTS=[];
 let PRIOLIST=[]; // prioridades del usuario que se está viendo (derivada de PRIO_ALL)
 let PRIO_ALL=[]; // todas las prioridades visibles (propias; admin ve las de todos)
 let PRIO_VIEW=null; // id del funcionario cuya matriz se está viendo (admin)
+let PERSONA_VIEW=null; // id de la persona cuyo detalle se ve en el panel Personas
 const myBlocks=()=>TIMEBLOCKS.filter(b=>b.userId===CURRENT.id);
 
 // ═══════════════ HELPERS ═══════════════
@@ -247,7 +248,7 @@ function buildNav(){
     ['espacios','🗂 Espacios de trabajo'],
     ['projects','💼 Proyectos'],
     ['tasks','✅ Tareas'],
-    ['timebox','⏱ Time Boxing'],
+    admin&&['personas','🧑 Personas'],
     admin&&['instrucciones','⚡ Instrucciones'],
     admin&&['users','👥 Usuarios'],
     ['rendimiento',admin?'📈 Rendimiento':'📈 Mi rendimiento'],
@@ -275,7 +276,7 @@ function buildNav(){
   const wb=document.getElementById('wsChipBtn'); if(wb)wb.onclick=e=>{e.stopPropagation();document.getElementById('wsMenu').classList.toggle('hidden');};
   const wm=document.getElementById('wsMenu'); if(wm)wm.onclick=e=>e.stopPropagation();
 }
-const SCREENS={panel:renderPanel,prioridades:renderPrioridades,espacios:renderEspacios,projects:renderProjects,tasks:renderTasks,timebox:renderTimebox,instrucciones:renderInstrucciones,
+const SCREENS={panel:renderPanel,prioridades:renderPrioridades,espacios:renderEspacios,projects:renderProjects,tasks:renderTasks,personas:renderPersonas,instrucciones:renderInstrucciones,
   users:renderUsers,rendimiento:renderTeamDash,reports:renderReports,meetings:renderMeetings,notes:renderNotes,
   calendar:renderCalendarScreen,activity:renderActivity};
 
@@ -640,6 +641,54 @@ async function editPrioItem(id,text){const t=(text||'').trim();const it=PRIO_ALL
 async function delPrioItem(id){await sb.from('priority_items').delete().eq('id',id);await loadAll();renderPrioridades();}
 function limpiarPrioridades(){const done=PRIO_ALL.filter(x=>x.ownerId===CURRENT.id&&x.done);if(!done.length)return;
   confirmModal('Limpiar completadas','¿Eliminar las '+done.length+' prioridad(es) ya completadas de tu lista?',async()=>{const {error}=await sb.from('priority_items').delete().eq('owner_id',CURRENT.id).eq('done',true);if(dbErr(error,'No se pudo limpiar'))return;await loadAll();renderPrioridades();},'Limpiar');}
+// ═══ PERSONAS (vista del jefe: detalle por persona) ═══
+function verPersona(id){PERSONA_VIEW=id;renderPersonas();}
+function volverPersonas(){PERSONA_VIEW=null;renderPersonas();}
+function renderPersonas(){REDRAW=renderPersonas;
+  if(CURRENT.role!=='admin'){main.innerHTML='<div class="p-10 max-w-3xl mx-auto text-center text-slate-400">Sección disponible solo para administradores.</div>';return;}
+  const team=MEMBERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(!PERSONA_VIEW){
+    main.innerHTML=`<div class="p-6 max-w-5xl mx-auto">
+      <h1 class="text-xl font-bold text-slate-900 mb-1">🧑 Personas</h1>
+      <p class="text-sm text-slate-500 mb-5">Tu equipo · haz clic en una persona para ver todo su detalle.</p>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${team.map(m=>{const s=statOf(m.id);return `<div onclick="verPersona('${m.id}')" class="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="w-11 h-11 rounded-full bg-inst/10 text-inst grid place-items-center font-semibold shrink-0">${initials(m.name)}</span>
+          <div class="min-w-0"><div class="font-semibold text-slate-800 truncate">${m.name}</div><div class="text-xs text-slate-400 truncate">${m.cargo||m.role} · ${m.area}</div></div></div>
+        <div class="flex items-center flex-wrap gap-2 text-[11px]">
+          <span class="px-2 py-0.5 rounded-full ${m.role==='Directivo'?'bg-inst/10 text-inst':'bg-slate-100 text-slate-500'}">${m.role}</span>
+          <span class="text-slate-500">📁 ${s.proyectos} proy</span><span class="text-slate-500">✅ ${s.tareas} tareas</span>${s.venc?`<span class="text-rose-600 font-medium">⚠ ${s.venc} venc.</span>`:''}</div>
+      </div>`;}).join('')||'<div class="text-sm text-slate-400 col-span-full">Sin personas. Créalas en Usuarios.</div>'}</div></div>`;
+    return;
+  }
+  const m=MEMBERS.find(x=>x.id===PERSONA_VIEW); if(!m){PERSONA_VIEW=null;return renderPersonas();}
+  const s=statOf(m.id), l=s.load;
+  const projs=PROJECTS.filter(p=>(p.usuarios||[]).includes(m.id));
+  const tks=TASKS.filter(t=>t.who===m.id&&taskWS(t)===CURRENT_WS).sort((a,b)=>(a.vence||'9999').localeCompare(b.vence||'9999'));
+  const prio=PRIO_ALL.filter(it=>it.ownerId===m.id);
+  const QN={hu:'🔴 Hacer ahora',hn:'🔵 Planificar',uu:'🟡 Atender pronto',nn:'⚪ Cuando se pueda'};
+  const big=(lb,v,c)=>`<div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm text-center"><div class="text-2xl font-bold text-${c}-600 tabular-nums">${v}</div><div class="text-[11px] text-slate-500">${lb}</div></div>`;
+  main.innerHTML=`<div class="p-6 max-w-5xl mx-auto">
+    <button onclick="volverPersonas()" class="text-xs text-slate-500 hover:text-inst mb-2">← Personas</button>
+    <div class="flex items-center gap-3 mb-1">
+      <span class="w-12 h-12 rounded-full bg-inst/10 text-inst grid place-items-center text-lg font-semibold shrink-0">${initials(m.name)}</span>
+      <div><h1 class="text-xl font-bold text-slate-900">${m.name}</h1><p class="text-sm text-slate-500">${m.cargo||''} · ${m.area} · <span class="${m.role==='Directivo'?'text-inst font-semibold':''}">${m.role}</span>${m.email?' · '+m.email:''}</p></div></div>
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 my-4">
+      ${big('Proyectos',s.proyectos,'slate')}${big('Tareas',s.tareas,'slate')}${big('Completadas',s.comp,'emerald')}${big('Vencidas',s.venc,'rose')}
+      <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm text-center"><div class="text-2xl font-bold text-${l.flag}-600 tabular-nums">${l.pct}%</div><div class="text-[11px] text-slate-500">Carga (${l.h}h/${JORNADA_H}h)</div></div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 class="text-sm font-bold text-slate-700 mb-2">📁 Proyectos (responsable)</h3>
+        <div class="space-y-1.5">${projs.length?projs.map(p=>{const ec=estadoColor[p.estado];return `<div onclick="renderProject('${p.id}')" class="cursor-pointer flex items-center gap-2 text-sm hover:bg-slate-50 rounded-lg px-2 py-1"><span class="w-2 h-2 rounded-full bg-${p.color}-500 shrink-0"></span><span class="flex-1 text-slate-700 truncate">${p.title}</span><span class="px-1.5 py-0.5 rounded bg-${ec}-100 text-${ec}-700 text-[10px]">${p.estado}</span></div>`;}).join(''):'<div class="text-xs text-slate-400">Sin proyectos asignados.</div>'}</div></div>
+      <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 class="text-sm font-bold text-slate-700 mb-2">✅ Tareas e instrucciones</h3>
+        <div class="space-y-1.5 max-h-64 overflow-y-auto">${tks.length?tks.map(t=>{const ec=estadoColor[efEstado(t)];return `<div onclick="openTask('${t.key}')" class="cursor-pointer flex items-center gap-2 text-sm hover:bg-slate-50 rounded-lg px-2 py-1"><span>${t.origin==='instruccion'?'📌':'✅'}</span><span class="flex-1 text-slate-700 truncate">${t.title}</span><span class="px-1.5 py-0.5 rounded bg-${ec}-100 text-${ec}-700 text-[10px]">${efEstado(t)}</span>${t.vence?`<span class="text-[10px] ${isVencida(t)?'text-rose-600 font-semibold':'text-slate-400'}">${fdate(t.vence)}</span>`:''}</div>`;}).join(''):'<div class="text-xs text-slate-400">Sin tareas asignadas.</div>'}</div></div>
+      <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-2">
+        <h3 class="text-sm font-bold text-slate-700 mb-2">🔥 Sus prioridades (matriz)</h3>
+        ${prio.length?`<div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">${['hu','hn','uu','nn'].map(k=>{const items=prio.filter(x=>x.quadrant===k);return `<div><div class="text-[11px] font-semibold text-slate-500 mb-1">${QN[k]} (${items.length})</div>${items.length?items.map(it=>`<div class="text-xs ${it.done?'line-through text-slate-400':'text-slate-700'} py-0.5">• ${escP(it.text)}</div>`).join(''):'<div class="text-[11px] text-slate-300">—</div>'}</div>`;}).join('')}</div>`:'<div class="text-xs text-slate-400">Esta persona aún no registró prioridades.</div>'}</div>
+    </div></div>`;
+}
 // ═══ REGISTRO DE ACTIVIDADES ═══
 function renderActivity(){REDRAW=renderActivity; purgeActivity();
   main.innerHTML=`<div class="p-6 max-w-3xl mx-auto"><h1 class="text-xl font-bold text-slate-900 mb-1">Registro de actividades</h1>
