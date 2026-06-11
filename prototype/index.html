@@ -575,7 +575,10 @@ function renderPrioridades(){REDRAW=renderPrioridades;
       </div>
     </details>
     <div class="rounded-xl border-2 border-inst/30 bg-white p-4 shadow-sm mb-5">
-      <h3 class="text-sm font-bold text-slate-700 mb-0.5">📝 Mis prioridades del día <span class="font-normal text-slate-400 text-xs">· lista personal · independiente de las tareas</span></h3>
+      <div class="flex items-start justify-between gap-2 mb-0.5">
+        <h3 class="text-sm font-bold text-slate-700">📝 Mis prioridades del día <span class="font-normal text-slate-400 text-xs">· lista personal · independiente de las tareas</span></h3>
+        ${PRIOLIST.some(x=>x.done)?`<button onclick="limpiarPrioridades()" class="shrink-0 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600 px-2.5 py-1">🧹 Limpiar completadas (${PRIOLIST.filter(x=>x.done).length})</button>`:''}
+      </div>
       <p class="text-[11px] text-slate-400 mb-3">Escríbelas, márcalas al terminar, edítalas (clic en el texto) o elimínalas.</p>
       <div class="flex gap-2 mb-3">
         <input id="prio_in" placeholder="Escribe una prioridad y pulsa Agregar…" onkeydown="if(event.key==='Enter')addPrioItem()" class="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-inst"/>
@@ -625,6 +628,12 @@ async function editPrioItem(id,text){const t=(text||'').trim();const it=PRIOLIST
   const {error}=await sb.from('priority_items').update({text:t}).eq('id',id);
   if(error){await loadAll();renderPrioridades();}}
 async function delPrioItem(id){await sb.from('priority_items').delete().eq('id',id);await loadAll();renderPrioridades();}
+function limpiarPrioridades(){const done=PRIOLIST.filter(x=>x.done);if(!done.length)return;
+  confirmModal('Limpiar completadas','¿Eliminar las '+done.length+' prioridad(es) ya completadas de tu lista? Esta acción no se puede deshacer.',async()=>{
+    const {error}=await sb.from('priority_items').delete().eq('owner_id',CURRENT.id).eq('done',true);
+    if(dbErr(error,'No se pudo limpiar la lista'))return;
+    await loadAll(); renderPrioridades();
+  },'Limpiar');}
 // ═══ REGISTRO DE ACTIVIDADES ═══
 function renderActivity(){REDRAW=renderActivity; purgeActivity();
   main.innerHTML=`<div class="p-6 max-w-3xl mx-auto"><h1 class="text-xl font-bold text-slate-900 mb-1">Registro de actividades</h1>
