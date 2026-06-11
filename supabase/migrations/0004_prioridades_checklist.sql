@@ -19,7 +19,11 @@ alter table priority_items add column if not exists quadrant text not null defau
 
 alter table priority_items enable row level security;
 
-create policy prio_own on priority_items
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+-- Lectura: el dueño o un administrador (supervisión). Escritura: SOLO el dueño.
+drop policy if exists prio_own on priority_items;
+create policy prio_read   on priority_items for select using (owner_id = auth.uid() or is_admin());
+create policy prio_insert on priority_items for insert with check (owner_id = auth.uid());
+create policy prio_update on priority_items for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy prio_delete on priority_items for delete using (owner_id = auth.uid());
 
 create index if not exists idx_prio_owner on priority_items(owner_id);

@@ -210,7 +210,9 @@ let NOTES=[];
 // ── Reuniones / Eventos de calendario ──
 let MEETINGS=[];
 let EVENTS=[];
-let PRIOLIST=[]; // lista personal de prioridades (checklist), independiente de tareas
+let PRIOLIST=[]; // prioridades del usuario que se está viendo (derivada de PRIO_ALL)
+let PRIO_ALL=[]; // todas las prioridades visibles (propias; admin ve las de todos)
+let PRIO_VIEW=null; // id del funcionario cuya matriz se está viendo (admin)
 const myBlocks=()=>TIMEBLOCKS.filter(b=>b.userId===CURRENT.id);
 
 // ═══════════════ HELPERS ═══════════════
@@ -531,8 +533,10 @@ function teamCharts(rows){
   </div>`;}
 // ═══ PRIORIDADES (matriz urgente / importante) ═══
 function renderPrioridades(){REDRAW=renderPrioridades;
+  const viewId=PRIO_VIEW||CURRENT.id, viewOwn=viewId===CURRENT.id;
+  PRIOLIST=PRIO_ALL.filter(it=>it.ownerId===viewId);
   const limU=(()=>{const d=new Date(HOY+'T00:00:00');d.setDate(d.getDate()+3);return d.toISOString().slice(0,10);})();
-  const tasks=visibleTasks().filter(t=>t.estado!=='Completada');
+  const tasks=TASKS.filter(t=>t.who===viewId&&taskWS(t)===CURRENT_WS&&t.estado!=='Completada');
   const esImp=t=>t.prioridad==='Alta';
   const esUrg=t=>!!t.vence&&t.vence<=limU;
   const q={hu:[],hn:[],uu:[],nn:[]};
@@ -550,25 +554,30 @@ function renderPrioridades(){REDRAW=renderPrioridades;
   const quad=(key,title,sub,color,list)=>{const mine=pq(key);return `<div class="rounded-xl border-2 border-${color}-300 bg-white p-3 shadow-sm flex flex-col">
     <div class="flex items-center justify-between mb-2"><div><div class="font-bold text-${color}-600 text-sm">${title}</div><div class="text-[11px] text-slate-500">${sub}</div></div><span class="text-xs font-bold text-${color}-700 bg-${color}-100 rounded-full px-2 py-0.5">${mine.length+list.length}</span></div>
     <div class="space-y-1.5 max-h-72 overflow-y-auto pr-1 mb-2 flex-1">
-      ${mine.map(it=>`<div class="flex items-center gap-2 group">
+      ${mine.map(it=>viewOwn?`<div class="flex items-center gap-2 group">
         <input type="checkbox" ${it.done?'checked':''} onchange="togglePrioItem('${it.id}',this.checked)" class="accent-[#1e3a8a] w-4 h-4 shrink-0 cursor-pointer"/>
         <input value="${escP(it.text)}" onchange="editPrioItem('${it.id}',this.value)" placeholder="(vacío para eliminar)" class="flex-1 min-w-0 bg-transparent outline-none border-b border-transparent focus:border-slate-200 text-sm ${it.done?'line-through text-slate-400':'text-slate-700'}"/>
-        <button onclick="delPrioItem('${it.id}')" title="Eliminar" class="text-slate-300 hover:text-rose-500 text-base shrink-0 opacity-60 group-hover:opacity-100">×</button></div>`).join('')}
+        <button onclick="delPrioItem('${it.id}')" title="Eliminar" class="text-slate-300 hover:text-rose-500 text-base shrink-0 opacity-60 group-hover:opacity-100">×</button></div>`:`<div class="flex items-center gap-2 text-sm"><span class="text-${color}-500 shrink-0">${it.done?'☑':'☐'}</span><span class="flex-1 ${it.done?'line-through text-slate-400':'text-slate-700'}">${escP(it.text)}</span></div>`).join('')}
       ${list.length?`<div class="text-[10px] text-slate-400 uppercase tracking-wide pt-1">Tareas que caen aquí</div>${list.map(card).join('')}`:''}
-      ${(!mine.length&&!list.length)?'<div class="text-xs text-slate-400 py-3 text-center">Vacío. Escribe abajo para agregar tu prioridad.</div>':''}
+      ${(!mine.length&&!list.length)?`<div class="text-xs text-slate-400 py-3 text-center">${viewOwn?'Vacío. Escribe abajo para agregar tu prioridad.':'Sin prioridades en este cuadrante.'}</div>`:''}
     </div>
-    <div class="flex gap-1.5">
+    ${viewOwn?`<div class="flex gap-1.5">
       <input id="prio_in_${key}" placeholder="+ Escribe una prioridad…" onkeydown="if(event.key==='Enter')addPrioItem('${key}')" class="flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:border-${color}-400"/>
       <button onclick="addPrioItem('${key}')" class="rounded-lg bg-${color}-500 hover:opacity-90 text-white text-sm px-3 font-bold">+</button>
-    </div></div>`;};
+    </div>`:''}</div>`;};
   const venc=tasks.filter(isVencida).length, hoy=tasks.filter(t=>t.vence===HOY).length, prox=tasks.filter(t=>t.vence&&t.vence>HOY&&t.vence<=limU).length, sinF=tasks.filter(t=>!t.vence).length, total=tasks.length+PRIOLIST.filter(x=>!x.done).length;
   const di=[{l:'🔴 Hacer ahora',v:q.hu.length+pq('hu').length,col:'#f43f5e'},{l:'🔵 Planificar',v:q.hn.length+pq('hn').length,col:'#3b82f6'},{l:'🟡 Atender pronto',v:q.uu.length+pq('uu').length,col:'#f59e0b'},{l:'⚪ Cuando se pueda',v:q.nn.length+pq('nn').length,col:'#94a3b8'}];
   const urg=[['Vencidas',venc,'#f43f5e'],['Vencen hoy',hoy,'#f59e0b'],['Próx. 3 días',prox,'#3b82f6'],['Sin fecha',sinF,'#94a3b8']];
   const maxU=Math.max(1,venc,hoy,prox,sinF);
   const stat=(l,v,c,ic)=>`<div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div class="flex items-center justify-between"><span class="text-xs text-slate-500">${l}</span><span class="text-slate-300">${ic}</span></div><div class="text-2xl font-bold text-${c}-600 tabular-nums mt-1">${v}</div></div>`;
   main.innerHTML=`<div class="p-6 max-w-6xl mx-auto">
-    <h1 class="text-xl font-bold text-slate-900 mb-1">🔥 Prioridades</h1>
-    <p class="text-sm text-slate-500 mb-3">Matriz urgente / importante · ${CURRENT.role==='admin'?'todo el espacio':'tus tareas e instrucciones'} · ${wsName(CURRENT_WS)}</p>
+    <h1 class="text-xl font-bold text-slate-900 mb-1">🔥 Prioridades${viewOwn?'':' · '+memberName(viewId)}</h1>
+    <p class="text-sm text-slate-500 mb-3">${viewOwn?'Tu matriz de decisión personal':'👁 Matriz de decisión de '+memberName(viewId)+' (solo lectura)'} · ${wsName(CURRENT_WS)}</p>
+    ${CURRENT.role==='admin'?`<div class="flex flex-wrap items-center gap-1.5 mb-4">
+      <span class="text-xs text-slate-500 mr-1">👥 Ver matriz de:</span>
+      <button onclick="verMatrizDe('${CURRENT.id}')" class="text-xs rounded-lg px-2.5 py-1 ${viewOwn?'bg-inst text-white':'bg-slate-100 text-slate-600 hover:bg-slate-200'}">🙋 La mía</button>
+      ${MEMBERS.filter(m=>m.role!=='Directivo').map(m=>`<button onclick="verMatrizDe('${m.id}')" class="text-xs rounded-lg px-2.5 py-1 ${viewId===m.id?'bg-inst text-white':'bg-slate-100 text-slate-600 hover:bg-slate-200'}">${m.name.split(' ')[0]}</button>`).join('')||'<span class="text-xs text-slate-400">Crea funcionarios en Usuarios para ver sus matrices.</span>'}
+    </div>`:''}
     <details class="mb-5 rounded-xl border border-inst/30 bg-white shadow-sm">
       <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-inst flex items-center gap-2">📐 ¿Cómo usar la matriz? Ver ejemplo</summary>
       <div class="px-4 pb-4">
@@ -602,8 +611,8 @@ function renderPrioridades(){REDRAW=renderPrioridades;
       </div>
     </div>
     <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-bold text-slate-700">📌 Mi matriz de prioridades <span class="font-normal text-slate-400 text-xs">· escribe en cada cuadrante · independiente de las tareas</span></h3>
-      ${PRIOLIST.some(x=>x.done)?`<button onclick="limpiarPrioridades()" class="shrink-0 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600 px-2.5 py-1">🧹 Limpiar completadas (${PRIOLIST.filter(x=>x.done).length})</button>`:''}
+      <h3 class="text-sm font-bold text-slate-700">📌 ${viewOwn?'Mi matriz de prioridades':'Matriz de '+memberName(viewId)} <span class="font-normal text-slate-400 text-xs">· ${viewOwn?'escribe en cada cuadrante · independiente de las tareas':'solo lectura'}</span></h3>
+      ${(viewOwn&&PRIOLIST.some(x=>x.done))?`<button onclick="limpiarPrioridades()" class="shrink-0 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-600 px-2.5 py-1">🧹 Limpiar completadas (${PRIOLIST.filter(x=>x.done).length})</button>`:''}
     </div>
     <div class="grid md:grid-cols-2 gap-4 items-stretch">
       ${quad('hu','🔴 Hacer ahora','Importante y urgente','rose',q.hu)}
@@ -614,17 +623,17 @@ function renderPrioridades(){REDRAW=renderPrioridades;
     <div class="text-[11px] text-slate-400 mt-3">Escribe tus prioridades en cualquier cuadrante (independientes de las tareas). Las <b>tareas</b> del sistema se ubican solas según prioridad (Alta) y plazo (≤3 días).</div>
   </div>`;
 }
-// ── Prioridades personales: se guardan en el navegador (localStorage), por usuario ──
-function loadPrio(){try{PRIOLIST=JSON.parse(localStorage.getItem('prio_'+(CURRENT&&CURRENT.id))||'[]');}catch(e){PRIOLIST=[];}if(!Array.isArray(PRIOLIST))PRIOLIST=[];}
-function savePrio(){try{localStorage.setItem('prio_'+(CURRENT&&CURRENT.id),JSON.stringify(PRIOLIST));}catch(e){}}
-function addPrioItem(key){const i=document.getElementById('prio_in_'+key);const t=(i&&i.value||'').trim();if(!t)return;
-  PRIOLIST.push({id:'p'+Date.now()+'-'+Math.floor(Math.random()*100000),text:t,done:false,doneAt:null,quadrant:key,position:PRIOLIST.length});
-  savePrio(); renderPrioridades(); const ni=document.getElementById('prio_in_'+key); if(ni)ni.focus();}
-function togglePrioItem(id,done){const it=PRIOLIST.find(x=>x.id===id);if(!it)return;it.done=done;it.doneAt=done?new Date().toISOString():null;savePrio();renderPrioridades();}
-function editPrioItem(id,text){const t=(text||'').trim();const it=PRIOLIST.find(x=>x.id===id);if(!it)return;if(!t){delPrioItem(id);return;}it.text=t;savePrio();}
-function delPrioItem(id){const i=PRIOLIST.findIndex(x=>x.id===id);if(i>=0)PRIOLIST.splice(i,1);savePrio();renderPrioridades();}
-function limpiarPrioridades(){const done=PRIOLIST.filter(x=>x.done);if(!done.length)return;
-  confirmModal('Limpiar completadas','¿Eliminar las '+done.length+' prioridad(es) ya completadas de tu lista?',()=>{PRIOLIST=PRIOLIST.filter(x=>!x.done);savePrio();renderPrioridades();},'Limpiar');}
+// ── Prioridades en Supabase (sincronizadas). El admin puede VER la matriz de cada funcionario. ──
+function verMatrizDe(id){PRIO_VIEW=id;renderPrioridades();}
+async function addPrioItem(key){if((PRIO_VIEW||CURRENT.id)!==CURRENT.id)return;const i=document.getElementById('prio_in_'+key);const t=(i&&i.value||'').trim();if(!t)return;
+  const {error}=await sb.from('priority_items').insert({owner_id:CURRENT.id,text:t,quadrant:key,position:PRIO_ALL.filter(x=>x.ownerId===CURRENT.id).length});
+  if(dbErr(error,'No se pudo agregar la prioridad'))return;
+  await loadAll(); renderPrioridades(); const ni=document.getElementById('prio_in_'+key); if(ni)ni.focus();}
+async function togglePrioItem(id,done){const {error}=await sb.from('priority_items').update({done,done_at:done?new Date().toISOString():null}).eq('id',id);if(error)console.warn(error.message);await loadAll();renderPrioridades();}
+async function editPrioItem(id,text){const t=(text||'').trim();const it=PRIO_ALL.find(x=>x.id===id);if(!it)return;if(!t){await delPrioItem(id);return;}if(it.text===t)return;it.text=t;const {error}=await sb.from('priority_items').update({text:t}).eq('id',id);if(error){await loadAll();renderPrioridades();}}
+async function delPrioItem(id){await sb.from('priority_items').delete().eq('id',id);await loadAll();renderPrioridades();}
+function limpiarPrioridades(){const done=PRIO_ALL.filter(x=>x.ownerId===CURRENT.id&&x.done);if(!done.length)return;
+  confirmModal('Limpiar completadas','¿Eliminar las '+done.length+' prioridad(es) ya completadas de tu lista?',async()=>{const {error}=await sb.from('priority_items').delete().eq('owner_id',CURRENT.id).eq('done',true);if(dbErr(error,'No se pudo limpiar'))return;await loadAll();renderPrioridades();},'Limpiar');}
 // ═══ REGISTRO DE ACTIVIDADES ═══
 function renderActivity(){REDRAW=renderActivity; purgeActivity();
   main.innerHTML=`<div class="p-6 max-w-3xl mx-auto"><h1 class="text-xl font-bold text-slate-900 mb-1">Registro de actividades</h1>
@@ -1546,8 +1555,8 @@ async function logout(){try{await sb.auth.signOut();}catch(e){}CURRENT=null;docu
 // ═══ Carga de datos reales desde Supabase ═══
 async function loadAll(){
   const q=async (t,sel='*')=>{const{data,error}=await sb.from(t).select(sel);if(error)console.warn('load '+t,error.message);return data||[];};
-  const [profs,wss,wms,prs,pms,tks,subs,exps,obs,tfs,mts,mas,evs,nts,tbs,acts]=await Promise.all(
-    ['profiles','workspaces','workspace_members','projects','project_members','tasks','subtasks','task_expenses','task_observations','task_files','meetings','meeting_attendees','events','notes','time_blocks','activities'].map(t=>q(t)));
+  const [profs,wss,wms,prs,pms,tks,subs,exps,obs,tfs,mts,mas,evs,nts,tbs,acts,pris]=await Promise.all(
+    ['profiles','workspaces','workspace_members','projects','project_members','tasks','subtasks','task_expenses','task_observations','task_files','meetings','meeting_attendees','events','notes','time_blocks','activities','priority_items'].map(t=>q(t)));
   MEMBERS=profs.map(p=>({id:p.id,name:p.name,role:p.role==='admin'?'Directivo':'Funcionario',area:p.area||'',cargo:p.cargo||'',email:p.email}));
   WORKSPACES=wss.map(w=>({id:w.id,name:w.name,primary:w.is_primary,leader:w.leader_id,userIds:wms.filter(m=>m.workspace_id===w.id).map(m=>m.profile_id)}));
   PROJECTS=prs.map(p=>({id:p.id,title:p.title,ownerId:p.owner_id,estado:p.estado,prioridad:p.prioridad,inicio:p.inicio,fin:p.fin,presupuesto:p.presupuesto,color:p.color||'blue',etiquetas:p.etiquetas||[],desc:p.descripcion||'',workspaceId:p.workspace_id,usuarios:pms.filter(m=>m.project_id===p.id).map(m=>m.profile_id)}));
@@ -1562,6 +1571,7 @@ async function loadAll(){
   NOTES=nts.map(n=>({id:n.id,userId:n.owner_id,title:n.title,body:n.body,updated:n.updated_at}));
   TIMEBLOCKS=tbs.map(b=>({id:b.id,userId:b.owner_id,day:b.day,start:+b.start_h,end:+b.end_h,title:b.title,color:b.color}));
   ACTIVITY=acts.sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).map(a=>({who:a.actor_id,action:a.action,obj:a.object_text,ts:'',at:new Date(a.created_at).getTime()}));
+  PRIO_ALL=pris.sort((a,b)=>(a.position-b.position)).map(x=>({id:x.id,ownerId:x.owner_id,text:x.text,done:x.done,doneAt:x.done_at,quadrant:x.quadrant||'hu',position:x.position}));
 }
 async function dbAct(action,obj){ try{ await sb.from('activities').insert({actor_id:CURRENT.id, action, object_text:obj}); }catch(e){} }
 function dbErr(error,msg){ if(error){ confirmModal('No se pudo guardar', (msg||'Ocurrió un error')+': '+error.message, ()=>{}, 'Entendido'); return true; } return false; }
@@ -1574,7 +1584,7 @@ async function afterAuth(uid){
   const {data:prof}=await sb.from('profiles').select('*').eq('id',uid).single();
   if(!prof){return false;}
   CURRENT={id:prof.id,name:prof.name,email:prof.email,role:prof.role};
-  loadPrio();
+  PRIO_VIEW=CURRENT.id;
   await loadAll();
   const myWs=WORKSPACES.filter(w=>CURRENT.role==='admin'||w.userIds.includes(CURRENT.id));
   CURRENT_WS=(myWs.find(w=>w.primary)||myWs[0]||{id:null}).id||CURRENT_WS;
