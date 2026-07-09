@@ -1,0 +1,27 @@
+name: Supabase Keep-Alive
+
+# Ejecuta un ping a Supabase cada 4 días para evitar la pausa automática
+# del plan gratuito (que ocurre tras 7 días sin actividad).
+
+on:
+  schedule:
+    - cron: '0 10 */4 * *'   # cada 4 días a las 10:00 UTC (07:00 Chile)
+  workflow_dispatch:           # también se puede lanzar manualmente desde GitHub
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://kianrcgzpnzfmeklmjww.supabase.co/rest/v1/profiles?select=id&limit=1" \
+            -H "apikey: sb_publishable_l6vqjgK-4fDKo1MkpcBOZg_r_U7pz8v" \
+            -H "Authorization: Bearer sb_publishable_l6vqjgK-4fDKo1MkpcBOZg_r_U7pz8v")
+          echo "Supabase respondió: HTTP $STATUS"
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "206" ]; then
+            echo "✅ Proyecto activo y respondiendo."
+          else
+            echo "⚠️ Respuesta inesperada: $STATUS"
+            exit 1
+          fi
